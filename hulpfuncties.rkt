@@ -37,7 +37,6 @@
 (provide minuut)
 (provide seconde)
 
-(require racket/gui/base) ; needed for play-sound
 (require racket/date) ; needed for date/time functions
 
 
