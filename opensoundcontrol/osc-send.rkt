@@ -13,12 +13,13 @@
 (define the-port #f)
 (define the-ip #f)
 
-(define (start-sending-osc [port 12345] [ip "127.0.0.1"])
-    (set! the-port port)
-    (set! the-ip ip))
+(define (start-sending-osc [ip "127.0.0.1"] [port 12345])
+    (set! the-ip ip)
+    (set! the-port port))
 
 
 (define (send-osc-message address arguments)
     (udp-send-to the-socket the-ip the-port
         (osc-element->bytes
             (osc-message (string->bytes/utf-8 address) arguments))))
+
