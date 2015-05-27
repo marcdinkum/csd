@@ -53,6 +53,7 @@
   (define instrument-name "violin")
   (define instrument "violin")
   (define keynumber 0)
+  (define prev-note-length 0)
 
   (define major-scales (list
   '(c cis d dis e f fis g gis a ais b)
@@ -193,10 +194,17 @@
 
   ; display a single note
   (define/private (display-note note)
-    (fprintf fileport "~a~a~a "
-      (number-to-note (cadr note)) ;; note name
-      (number-to-quotes (number-to-octave (cadr note))) ;; quotes for octave
-      (length-encoding (caddr note)))) ;; note length
+    (define new-length (length-encoding (caddr note)))
+    (fprintf fileport "~a~a"
+      (number-to-note (cadr note)) ; note name
+      (number-to-quotes (number-to-octave (cadr note)))) ; quotes for octave
+    ;(if (not (= new-length prev-note-length)) ; running status
+    ; ff checken of new-length wel een number is (!)
+      (fprintf fileport "~a " new-length) ; length changes to new value
+      ;(fprintf fileport " ")) ; length unchanged
+    (set! prev-note-length new-length))
+
+      ;(length-encoding (caddr note)))) ;; note length
 
   ; display a rest (a.k.a. nap)
   (define/private (display-nap nap)
@@ -219,7 +227,18 @@
        (for ((i (cdr item))); parse the rest of the items
 	     (parse i))
        (fprintf fileport ">> ")); the end of parallel
-      
+     
+      ; handling of tuplets: 
+      ((equal? keyword 'tuplet)
+       ; tuplet start with fraction consisting of the number of
+       ;  notes divided by the target number of notes as given
+       (fprintf fileport "\\tuplet ~a/~a {"
+         (- (length item) 2)
+         (cadr item))
+       (for ((i (cddr item))); parse the rest of the items
+	     (parse i))
+       (fprintf fileport "} ")); tuplet end
+
       ; notes and naps should just be displayed
       ((equal? keyword 'note)
 	 (display-note item))
@@ -299,10 +318,17 @@
 ;
 ; (define notes '(serial
 ;  (note 61 8) (note 60 8) (note 67 8) (note 69 8) (note 70 8)
-;  (note 70 8) (note 69 8) (note 70 8) (note 67 8) (note 63 8)
-;  (note 65 8) (note 67 8) (note 63 8) (note 62 8) (note 62 8)
+;  (note 70 8) (note 69 8) (nap 70 8) (note 67 8) (note 63 8)
+;  (note 65 8) (note 67 8) (note 63 8) (nap 62 8) (note 62 8)
 ;  (note 60 8))
 ;
+; with a tuplet
+; '(serial
+;   (note 60 4)
+;   (note 60 4)
+;   (note 60 4)
+;   (tuplet 2 (note 60 8) (note 60 8) (note 60 8)))
+; 
 ; The elaborate way: open a file, specify some props and write it
 ; (begin-nieuwe-lilypond-file "example_1.ly")
 ; (lilypond-titel "Een en al vrolijkheid")

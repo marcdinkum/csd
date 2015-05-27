@@ -22,7 +22,6 @@
 ;  (note-to-number note) - translate absolute note name to number
 ;  (notes-to-numbers lst) - translate list of absolute notes name to numbers
 ;  (transpose phrase offset)
-;  (change-tempo lst factor) -- deprecated. Use scale-length instead
 ;  (scale-length lst factor)
 ;  (merge-phrases phrase1 phrase2 ....)
 ;  (merge-phraselist (phrase1 phrase2 ....))
@@ -32,6 +31,24 @@
 ;
 ; Desired functions:
 ;  modulo12, erode, dilate, filter
+;
+; Desired functionality for dots, tuplets and ties:
+;  handling of dotted notes -> notation: 8. 4. 2.
+;  handling of tuplets -> notation: (tuplet pack-into (note ..) (note ..) (note ..))
+;  handling of ties -> notation: 8~ 4~ 2~ etc.
+; ability to do maths with the length values -> do they have to be numbers...??
+
+; dotted notes
+; '(serial (note 0 8) (note 0 2.) (note 0 8))
+
+; ties
+; '(serial (note 0 8) (note 0 4) (note 0 2) (note 0 4~) (note 0 1))
+
+; tuplets
+; A tuplet needs a number of notes to be squeezed down into a given number.
+; (tuplet 2 (note 0 4) (note 1 4) (note 2 4))
+; will result in a Lilypond notation of \tuplet 3/2 {c d e}
+
 ;
 ; Examples: at end of file
 ;
@@ -44,7 +61,6 @@
 (provide note-to-number)
 (provide notes-to-numbers)
 (provide transpose)
-(provide change-tempo)
 (provide scale-length)
 (provide merge-phrases)
 (provide merge-phraselist)
@@ -57,6 +73,18 @@
 (define (dotnote n)
   (if (flonum? n) (* 2/3 (inexact->exact n)) n))
 
+; may be useful for ties
+(define (splitz str (index 0))
+    (if (not (char-numeric? (string-ref str index)))
+      (list (string->number (substring str 0 index))
+            (substring str index))
+      (splitz str (+ index 1))))
+
+(define (convert-length n)
+  (if (number? n) (list n "")
+    (splitz (symbol->string n))))
+
+
 ; Combine melody and rhythm into a serial phrase according to our own format.
 ;
 ; A pitch identifier that is not a number is regarded as a nap.
@@ -65,12 +93,30 @@
 ;  that would be interpreted as an absolute notation, which e.g. leads to
 ;  problems while transposing
 ; Well... maybe later if we fully understand the consequences :-)
+
 (define (make-phrase melody rhythm)
-  (cons 'serial
-   (for/list ((note-pitch melody) (note-length rhythm))
-     (if (number? note-pitch)
-         (list 'note note-pitch (dotnote note-length))
-         (list 'nap (dotnote note-length))))))
+  (cons 'serial (make-tuplet melody rhythm)))
+
+(define (make-tuplet lst1 lst2)
+  (if (or (empty? lst1) (empty? lst2)) '()
+    (if (list? (car lst2)) ; must be tuplet
+      ; construct tuplet and insert it
+      ; leave 'tuplet and the length intact and interleave the given length
+      ; values with corresponding pitch values in a (for/list). Use append,
+      ;  not cons because we want everything in one big list, so unpack the
+      ;  result of (for/list).
+      ; Finally recurse with the used pitch values removed from lst1
+      (cons (append (list 'tuplet (cadr (car lst2)))
+          (for/list ((pitch lst1) (len (cddr (car lst2)))) (make-note pitch len)))
+          (make-tuplet (list-tail lst1 (- (length (car lst2)) 2)) (cdr lst2)))
+	; insert 'normal' note
+        (cons (make-note (car lst1) (car lst2)) (make-tuplet (cdr lst1) (cdr lst2))))))
+
+(define (make-note note-pitch note-length)
+  (if (number? note-pitch)
+    (list 'note note-pitch (dotnote note-length))
+    (list 'nap (dotnote note-length))))
+
 
 ;;
 ;; make-parallel combines two or more voices into a parallel structure
@@ -104,32 +150,50 @@
 ;; if a nap, return as-is
 (define (transpose-note note offset)
   (if (symbol? note) note
-    (if (equal? (car note) 'note) (list 'note (+ (cadr note) offset) (caddr note))
-      note)))
+    (if (eq? (car note) 'tuplet) (transpose-tuplet note offset)
+      (if (equal? (car note) 'note) (list 'note (+ (cadr note) offset) (caddr note))
+        note))))
 
 ; Transpose a phrase using apply-transform at note level
 (define (transpose phrase offset)
   (apply-transform phrase '() '() (lambda (note) (transpose-note note offset))))
 
+; transpose-tuplet: add offset to tuplet notes
+;  this gets called by transpose-note and in turn calls transpose-note ;-)
+(define (transpose-tuplet tuplet offset)
+  (append (list 'tuplet (cadr tuplet))
+    (for/list ((note (cddr tuplet))) (transpose-note note offset))))
 
-;; Scale the length of a note by a factor.
-;; First find out if note is a symbol like 'serial or 'parallel, in that case return unchanged
-;;  else change its length value and leave the rest unchanged
+
+;
+; FIXME - must be adapted for new length indicators
+;
+
+; scale-tuplet: multiply tuplet length and all its note lengths by a factor
+;(define (scale-tuplet tuplet factor)
+  ;(list 'tuplet (* (cadr tuplet) factor)
+    ;(for/list ((note (cddr tuplet))) (list (car note) (cadr note) (* (caddr note) factor)))))
+
+; scale-tuplet: scale tuplet note lengths
+;  this gets called by scale-note-length and in turn calls scale-note-length ;-)
+(define (scale-tuplet tuplet factor)
+  (append (list 'tuplet (cadr tuplet))
+    (for/list ((note (cddr tuplet))) (scale-note-length note factor))))
+
+; Scale the length of a note by a factor.
+; First find out if note is a symbol like 'serial or 'parallel, in that case return unchanged
+;  if we're dealing with a tuplet, call scale-tuplet
+;   else change its length value and leave the rest unchanged
 (define (scale-note-length note factor)
   (if (symbol? note) note
-    (cond ((equal? (car note) 'note) (list (car note) (cadr note) (* (caddr note) factor)))
-          ((equal? (car note) 'nap) (list (car note) (* (cadr note) factor))))))
+    (if (eq? (car note) 'tuplet) (scale-tuplet note factor)
+      (cond ((equal? (car note) 'note) (list (car note) (cadr note) (* (caddr note) factor)))
+            ((equal? (car note) 'nap) (list (car note) (* (cadr note) factor)))))))
 
 ;; Scale the lengths of all notes and rests in a phrase
 ;; 
-(define (scale-length lst factor)
- (if (empty? lst) '()
-    (cons (scale-note-length (car lst) factor) (scale-length (cdr lst) factor))))
-
-
-; for the time being provide the old function for backwards compatibility
-(define change-tempo scale-length)
-
+(define (scale-length phrase factor)
+  (apply-transform phrase '() '() (lambda (note) (scale-note-length note factor))))
 
 
 ; Merge two or more phrases into a single phrase.
@@ -183,7 +247,7 @@
 ; - lst  the list of notes to transform
 ; - parallel-func  the function to be applied to every parallel block
 ; - serial-func  the function to be applied to every serial block
-; - note-func  the function to be applied to every note (or nap)
+; - note-func  the function to be applied to every note, nap or tuplet
 
   (define (apply-transform lst parallel-func serial-func note-func)
     (cond 
@@ -202,7 +266,7 @@
        (cons (car lst) (apply-transform (if (empty? parallel-func) (cdr lst) (parallel-func (cdr lst))) parallel-func serial-func note-func)))
       
       ; if this is a note or a nap, return the note (transform if needed)
-      ((or (equal? (car lst) 'note) (equal? (car lst) 'nap))
+      ((or (equal? (car lst) 'note) (equal? (car lst) 'nap) (equal? (car lst) 'tuplet))
        (if (empty? note-func)
            lst
            (note-func lst)))))
@@ -251,10 +315,10 @@
   
   
 ;; examples
-;(define melodie '(9 7 5 4 7 nap 9 5))
-;(define ritme '(16 16 16 16 16 16 16 16 16))
-;(define notes (make-phrase melodie ritme))
-;(define compositie (merge-phrases notes (transpose notes 3) (scale-length notes 2)))
+;(define melodie '(9 7 5 7  nap 9 5))
+;(define ritme '(16 16 16 16  (tuplet 2 16 16 16)))
+;(define phrase (make-phrase melodie ritme))
+;(define compositie (merge-phrases phrase (transpose notes 3) (scale-length notes 2)))
 
 ;(define trpnotes (transpose notes 60))
 ;(define slownotes (scale-length trpnotes 1/2))
