@@ -177,8 +177,9 @@
   ; Since this has already been discounted we need to nullify it and add a
   ;  dot to accord with Lilypond's notation
   (define/private (length-encoding number)
-    (if (exact-integer? number) number
-      (format "~a." (* 3/2 number))))
+    (if (symbol? number) number ; probably a tie, i.e. 4~ or something
+      (if (exact-integer? number) number
+        (format "~a." (* 3/2 number)))))
 
 
   ;; Lilypond uses single quote and comma to raise or lower a note's pitch by

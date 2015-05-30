@@ -1,5 +1,5 @@
 ;********************************************************************
-;       (c) Copyright 2012, Hogeschool voor de Kunsten Utrecht
+;       (c) Copyright 2012-2015 Hogeschool voor de Kunsten Utrecht
 ;                       Hilversum, the Netherlands
 ;********************************************************************
 ;
@@ -68,21 +68,20 @@
 (provide reverse-phrase)
 (provide apply-transform)
 
-; dotnote is used for dotted notes which have a duration of 3/2 times the
-;  indicated integer.
+; dotnote is used for dotted notes which have a duration of 3/2 times the indicated integer
+;  and it handles length-modifiers like tie (indicated by ~)
+; A floating point number is considered a dotted note. Integers are unchanged.
 (define (dotnote n)
-  (if (flonum? n) (* 2/3 (inexact->exact n)) n))
-
-; may be useful for ties
-(define (splitz str (index 0))
-    (if (not (char-numeric? (string-ref str index)))
-      (list (string->number (substring str 0 index))
-            (substring str index))
-      (splitz str (+ index 1))))
-
-(define (convert-length n)
-  (if (number? n) (list n "")
-    (splitz (symbol->string n))))
+  (if (symbol? n) ; for now, assume a tie
+    (let* ((tie-str (symbol->string n))
+           (length-modifier (substring tie-str (- (string-length tie-str) 1)))
+           (length-numeric (string->number (substring tie-str 0 (- (string-length tie-str) 1)))))
+    (string->symbol
+      (string-append
+        (number->string (if (flonum? length-numeric) (* 2/3 (inexact->exact length-numeric)) length-numeric))
+	length-modifier)))
+  ; else, so n is not a symbol
+  (if (flonum? n) (* 2/3 (inexact->exact n)) n)))
 
 
 ; Combine melody and rhythm into a serial phrase according to our own format.
@@ -111,6 +110,7 @@
           (make-tuplet (list-tail lst1 (- (length (car lst2)) 2)) (cdr lst2)))
 	; insert 'normal' note
         (cons (make-note (car lst1) (car lst2)) (make-tuplet (cdr lst1) (cdr lst2))))))
+
 
 (define (make-note note-pitch note-length)
   (if (number? note-pitch)
@@ -143,6 +143,10 @@
   (for/list ((note lst)) (note-to-number note)))
 
 
+;
+; pitch manipulation
+;
+
 ;; transpose a note
 ;; first find out if note is a symbol like 'serial or 'parallel, in that case return unchanged
 ;;  else find out if note is a note or a nap or something else
@@ -166,13 +170,8 @@
 
 
 ;
-; FIXME - must be adapted for new length indicators
+; length manipulation
 ;
-
-; scale-tuplet: multiply tuplet length and all its note lengths by a factor
-;(define (scale-tuplet tuplet factor)
-  ;(list 'tuplet (* (cadr tuplet) factor)
-    ;(for/list ((note (cddr tuplet))) (list (car note) (cadr note) (* (caddr note) factor)))))
 
 ; scale-tuplet: scale tuplet note lengths
 ;  this gets called by scale-note-length and in turn calls scale-note-length ;-)
@@ -187,13 +186,31 @@
 (define (scale-note-length note factor)
   (if (symbol? note) note
     (if (eq? (car note) 'tuplet) (scale-tuplet note factor)
-      (cond ((equal? (car note) 'note) (list (car note) (cadr note) (* (caddr note) factor)))
-            ((equal? (car note) 'nap) (list (car note) (* (cadr note) factor)))))))
+      (cond ((equal? (car note) 'note) (list (car note) (cadr note) (scale-tie (caddr note) factor)))
+            ((equal? (car note) 'nap) (list (car note) (scale-tie (cadr note) factor)))))))
+
+; scale-tie knows how to scale a tie
+; If given length value is a symbol it is assumed to be a number with a ~
+; to indicate a tie. In that case the numeric value is multiplied by factor
+; and the symbol is put together again
+; If given length value is not a symbol it is assumed to be a number
+;  and multiplied by factor
+(define (scale-tie n factor)
+  (if (symbol? n) ; for now, assume a tie
+    (let* ((tie-str (symbol->string n))
+           (length-modifier (substring tie-str (- (string-length tie-str) 1)))
+           (length-numeric (string->number (substring tie-str 0 (- (string-length tie-str) 1)))))
+      (string->symbol
+        (string-append
+          (number->string (* length-numeric factor)) length-modifier)))
+  (* n factor)))
+
 
 ;; Scale the lengths of all notes and rests in a phrase
 ;; 
 (define (scale-length phrase factor)
   (apply-transform phrase '() '() (lambda (note) (scale-note-length note factor))))
+
 
 
 ; Merge two or more phrases into a single phrase.
