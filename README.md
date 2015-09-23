@@ -8,11 +8,6 @@ Bij OSX is dat in /Applications/Racket.../collects
 Vervolgens kun je in de file .racketrc deze regels toevoegen om ervoor te zorgen dat deze modules automatisch worden ingeladen wanneer racket start:
 
     (require inf/lilypond)
-    (require inf/hulpfuncties)
-
-Voor meer power (maar vereist iets meer programming skills):
-
-    (require inf/lilypond)
     (require inf/music_transforms)
 
 Kijk in de files voor voorbeelden.
