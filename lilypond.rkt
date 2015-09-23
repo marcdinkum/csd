@@ -1,5 +1,5 @@
 ;********************************************************************
-;       (c) Copyright 2013, Hogeschool voor de Kunsten Utrecht
+;       (c) Copyright 2015, Hogeschool voor de Kunsten Utrecht
 ;                       Hilversum, the Netherlands
 ;********************************************************************
 ;
@@ -9,7 +9,7 @@
 ; Description   : Racket Scheme class for creating Lilypond files
 ;
 ; Authors       : Marc Groenewegen, Daan van Hasselt
-; E-mail        : marc.groenewegen@kmt.hku.nl, daan.vanhasselt@kmt.hku.nl
+; E-mail        : marc.groenewegen@hku.nl, contact@daanvanhasselt.com
 ;
 ;*********************************************************************
 ;
@@ -22,15 +22,17 @@
 
 #lang racket
 
-(provide make-lilypond-file) ; kept for backwards compatibility
-(provide begin-nieuwe-lilypond-file)
-(provide lilypond-titel)
-(provide lilypond-componist)
+(provide lilypond-open)
+(provide lilypond-title)
+(provide lilypond-composer)
 (provide lilypond-tempo)
-(provide lilypond-sleutel)
-(provide lilypond-schaal)
+(provide lilypond-key)
+(provide lilypond-clef)
+(provide lilypond-time-signature)
 (provide lilypond-instrument)
-(provide schrijf-lilypond-file)
+(provide lilypond-part)
+(provide lilypond-write)
+(provide lilypond-close)
 
 
 ; create a lilygenerator so the user doesn't need to specify it with
@@ -42,18 +44,29 @@
  (class object%
 
   ; define some default values
+  (define lilyversion "2.18.2")
   (define fileport 0)
-  (define file_open #f)
-  (define title "Titel")
-  (define composer "Componist")
+  (define filetype 'part)
+  (define parts '())
+  (define title "Something good")
+  (define composer "Composer")
+  ;
+  ; part-specific
+  ;
+  (define version-written #f)
+  (define header-written #f)
+  (define first-part #t)
+  (define partname "piano")
   (define tempo 120)
-  (define key "c")
+  (define keybase "c")
+  (define keynumber 0)
   (define keytype "major")
+  (define clef "treble")
+  (define time-signature "4/4")
   (define instrument-specified #f)
   (define instrument-name "violin")
-  (define instrument "violin")
-  (define keynumber 0)
-  (define prev-note-length 0)
+  (define instrument "violin") ; literal string describing the instrument
+
 
   (define major-scales (list
   '(c cis d dis e f fis g gis a ais b)
@@ -97,10 +110,25 @@
    (define base-notes (vector "c" "cis" "des" "d" "dis" "es" "e" "f" "fis"
                            "ges" "g" "gis" "as" "a" "ais" "bes" "b"))
 
+  ; calculate scaleDurations by inverting time signature
+  ;
+  (define (scale-durations ts)
+    (string-join (reverse (string-split ts "/")) "/" ))
+
   (super-new)
 
   (define/public (openFile filename)
+    ; part name is basename of filename
+   (set! partname (car (string-split filename ".")))
    (set! fileport (open-output-file filename #:exists 'replace)))
+
+  ; Supported types:
+  ; 'definition : only the note material
+  ; 'part : a complete part, including the score
+  ; 'score : multi-part score
+  ;
+  (define/public (set-type newtype)
+   (set! filetype newtype))
 
   (define/public (set-title newtitle)
    (set! title newtitle))
@@ -111,52 +139,111 @@
   (define/public (set-tempo new-tempo)
    (set! tempo new-tempo))
 
-  (define/public (set-key new-key)
-   (set! key (string-downcase new-key))
-   (set! keynumber (vector-member key base-notes)))
+  (define/public (set-keybase new-keybase)
+   (set! keybase (string-downcase new-keybase))
+   (set! keynumber (vector-member keybase base-notes)))
 
   (define/public (set-keytype new-keytype)
    (set! keytype new-keytype))
+
+  (define/public (set-clef new-clef)
+   (set! clef new-clef))
+
+  (define/public (set-time-signature new-time-signature)
+   (set! time-signature new-time-signature))
 
   (define/public (set-instrument new-instrument-name new-instrument)
    (set! instrument-name new-instrument-name)
    (set! instrument new-instrument)
    (set! instrument-specified #t))
 
+  (define/public (write-version)
+    (when (not version-written)
+      (begin
+        (fprintf fileport "\\version ~s\n\n" lilyversion)
+        (set! version-written #t))))
+
   (define/public (write-header)
-   (fprintf fileport
-"\\version ~s
-\\header {
+    (when (not header-written)
+      (begin
+        (fprintf fileport
+"\\header {
   title = ~s
   composer = ~s
-}\n\n" "2.10.5" title composer))
+}\n\n" title composer)
+        (set! header-written #t))))
 
 
-  (define/public (write-lily-file notes)
+; 'definition
+; - does not write a header
+; - writes notes for one part
+; - part name is basename of the file
+;
+; 'part
+; - includes one definition file
+; - part name is basename of the file
+; - writes a score block for one part with one Staff
+;
+;
+; 'score
+; - includes multiple definition files
+; - writes a score block with a StaffGroup and a Staff for each definition
+; - part names are the basenames of the files
+;
+;
+
+  (define/public (write-part notes)
+     (cond
+	((eq? filetype 'definition)
+          (write-version)
+	  (write-definition notes))
+        ((eq? filetype 'part)
+          (write-version)
+          (write-header)
+          (fprintf fileport "\\score\n{\n") ; open score
+          (write-next-part partname notes #t))
+        ((eq? filetype 'score)
+          (write-version)
+          (write-header)
+          (if first-part ; before first part, open score and StaffGroup
+            (begin
+              (fprintf fileport "\\score\n{\n  \\new StaffGroup\n  {\n    <<\n")
+              (write-next-part partname notes #t)
+              (set! first-part #f))
+            (write-next-part partname notes #f)))))
+
+
+  (define/public (write-definition notes)
+    (fprintf fileport "~s = " partname)
+    (parse notes))
+
+
+  (define/public (add-part name) ; start new part with its own name
+    (set! partname name))
+
+
+  (define/public (write-next-part name notes with-tempo)
    (begin
-    (fprintf fileport
-"\\score
-{
-  \\new Staff
-  {
-    \\tempo 4=~a
-    \\key ~a \\~a
-    \\clef treble\n" tempo key keytype)
+    (fprintf fileport "  \\new Staff\n  {\n")
+
+    (when with-tempo (fprintf fileport "    \\tempo 4=~a\n" tempo))
+    (fprintf fileport "    \\key ~a \\~a\n    \\clef ~a\n" keybase keytype clef)
     (when instrument-specified
       (fprintf fileport
-        (format "\\set Staff.instrumentName = \"~a\"\n" instrument-name))
+	(format "    \\set Staff.instrumentName = \"~a\"\n" instrument-name))
       (fprintf fileport
-        (format "\\set Staff.midiInstrument = #\"~a\"\n" instrument)))
- (parse notes) 
- (fprintf fileport
-    "
-    }
-    \\layout {
-       \\context { \\RemoveEmptyStaffContext }
-    }
-    \\midi { }
-  }" )))
- 
+	(format "    \\set Staff.midiInstrument = #\"~a\"\n" instrument)))
+      ; for other time signatures than 4/4 write ts and duration
+      (when (not (string=? time-signature "4/4"))
+        (begin
+          (fprintf fileport
+            (format "    \\set Staff.timeSignatureFraction = ~a\n" time-signature))
+          (fprintf fileport
+            (format "    \\scaleDurations ~a\n" (scale-durations time-signature)))))
+      (parse notes)
+      (fprintf fileport "  } % Staff\n\n"))) ; close staff
+
+
   ; convert a midi note number into a note name (primitive version)
   ;
   ; should be able to:
@@ -199,13 +286,8 @@
     (fprintf fileport "~a~a"
       (number-to-note (cadr note)) ; note name
       (number-to-quotes (number-to-octave (cadr note)))) ; quotes for octave
-    ;(if (not (= new-length prev-note-length)) ; running status
     ; ff checken of new-length wel een number is (!)
-      (fprintf fileport "~a " new-length) ; length changes to new value
-      ;(fprintf fileport " ")) ; length unchanged
-    (set! prev-note-length new-length))
-
-      ;(length-encoding (caddr note)))) ;; note length
+      (fprintf fileport "~a " new-length)) ; length changes to new value
 
   ; display a rest (a.k.a. nap)
   (define/private (display-nap nap)
@@ -215,7 +297,7 @@
   (define/private (parse item)
     ; the first element of the item we're parsing is always a keyword
     (define keyword (car item))
-    (cond 
+    (cond
       ((equal? keyword 'serial) ; the start of a serial block
        (fprintf fileport "{ "); the start of a serial block
        (for ((i (cdr item))); parse the rest of the items
@@ -223,13 +305,13 @@
        (fprintf fileport "} \\\\ \n")); the end of a serial block
        ; double backslash creates a new voice for every block
 
-      ((equal? keyword 'parallel) 
+      ((equal? keyword 'parallel)
        (fprintf fileport "<< "); the start of a parallel block
        (for ((i (cdr item))); parse the rest of the items
 	     (parse i))
        (fprintf fileport ">> ")); the end of parallel
-     
-      ; handling of tuplets: 
+
+      ; handling of tuplets:
       ((equal? keyword 'tuplet)
        ; tuplet start with fraction consisting of the number of
        ;  notes divided by the target number of notes as given
@@ -244,9 +326,17 @@
       ((equal? keyword 'note)
 	 (display-note item))
       ((equal? keyword 'nap)
-	 (display-nap item)))) ;; end parse
+	 (display-nap item)))) ; end parse
 
   (define/public (closeFile)
+    (when (eq? filetype 'score) ; close StaffGroup
+      (fprintf fileport "\n    >>\n  } % StaffGroup\n\n"))
+    ; write layout, midi and close score
+    (fprintf fileport "\n  \\layout {
+    \\context { \\RemoveEmptyStaffContext }
+  }
+  \\midi { }
+} % score" )
     (close-output-port fileport))
 
 )) ; class LilyGenerator%
@@ -254,18 +344,19 @@
 
 ; show warning if functions are called on non-existent object
 (define (warning-no-lily-object)
-  (display "Begin eerst een nieuwe file met begin-nieuwe-lilypond-file\n"))
+  (display "First start a new Lilypond file with (lilypond-open filename)\n"))
 
-(define (begin-nieuwe-lilypond-file filename)
+(define (lilypond-open filename (filetype 'part))
   (set! lilygenerator (new LilyGenerator%))
-  (send lilygenerator openFile filename))
-  
-(define (lilypond-titel title)
+  (send lilygenerator openFile filename)
+  (send lilygenerator set-type filetype))
+
+(define (lilypond-title title)
   (if (equal? lilygenerator #f)
     (warning-no-lily-object)
     (send lilygenerator set-title title)))
 
-(define (lilypond-componist composer)
+(define (lilypond-composer composer)
   (if (equal? lilygenerator #f)
     (warning-no-lily-object)
     (send lilygenerator set-composer composer)))
@@ -275,44 +366,41 @@
     (warning-no-lily-object)
     (send lilygenerator set-tempo tempo)))
 
-(define (lilypond-sleutel key)
+(define (lilypond-part name)
   (if (equal? lilygenerator #f)
     (warning-no-lily-object)
-    (send lilygenerator set-key key)))
+    (send lilygenerator add-part name)))
 
-(define (lilypond-schaal keytype)
+(define (lilypond-key keybase keytype)
   (if (equal? lilygenerator #f)
     (warning-no-lily-object)
-    (send lilygenerator set-keytype keytype)))
+    (begin
+      (send lilygenerator set-keybase keybase)
+      (send lilygenerator set-keytype keytype))))
+
+(define (lilypond-clef clef)
+  (if (equal? lilygenerator #f)
+    (warning-no-lily-object)
+    (send lilygenerator set-clef clef)))
+
+(define (lilypond-time-signature time-signature)
+  (if (equal? lilygenerator #f)
+    (warning-no-lily-object)
+    (send lilygenerator set-time-signature time-signature)))
 
 (define (lilypond-instrument instrument-name instrument)
   (if (equal? lilygenerator #f)
     (warning-no-lily-object)
     (send lilygenerator set-instrument instrument-name instrument)))
 
-(define (schrijf-lilypond-file notes)
+(define (lilypond-write notes)
   (if (equal? lilygenerator #f)
     (warning-no-lily-object)
-    (begin
-      (send lilygenerator write-header)
-      (send lilygenerator write-lily-file notes)
+    (send lilygenerator write-part notes)))
+
+(define (lilypond-close)
       (send lilygenerator closeFile)
-      (set! lilygenerator #f)))) ; instruct garbage collector to destroy the object
-
-
-; for backwards compatibility: the all-in-one lilypond construction call
-(define (make-lilypond-file filename title composer key keytype notes)
-   (begin
-    (set! lilygenerator (new LilyGenerator%))
-    (send lilygenerator openFile filename)
-    (send lilygenerator set-title title)
-    (send lilygenerator set-composer composer)
-    (send lilygenerator set-key key)
-    (send lilygenerator set-keytype keytype)
-    (send lilygenerator write-header)
-    (send lilygenerator write-lily-file notes)
-    (send lilygenerator closeFile)
-    (set! lilygenerator #f))) ; instruct garbage collector to destroy the object
+      (set! lilygenerator #f)) ; instruct garbage collector to destroy the object
 
 
 ; Examples
@@ -329,17 +417,17 @@
 ;   (note 60 4)
 ;   (note 60 4)
 ;   (tuplet 2 (note 60 8) (note 60 8) (note 60 8)))
-; 
-; The elaborate way: open a file, specify some props and write it
-; (begin-nieuwe-lilypond-file "example_1.ly")
-; (lilypond-titel "Een en al vrolijkheid")
-; (lilypond-componist "Marc")
-; (lilypond-tempo 78)
-; (lilypond-sleutel "g")
-; (lilypond-schaal "minor")
-; (lilypond-instrument "guitar" "acoustic guitar (nylon)")
-; (schrijf-lilypond-file notes)
 ;
-; The compact way: everything in one function call
-; (make-lilypond-file "example_2.ly" "Just a song" "Somebody" "c" "major" notes)
+; The elaborate way: open a file, specify some props and write it
+; (lilypond-open "happiness.ly")
+; (lilypond-title "Een en al vrolijkheid")
+; (lilypond-composer "Marc")
+; (lilypond-tempo 78)
+; (lilypond-key "g" "minor")
+; (lilypond-clef "treble")
+; (lilypond-time-signature "3/4")
+; (lilypond-instrument "guitar" "acoustic guitar (nylon)")
+; (lilypond-write notes)
+; (lilypond-close)
+;
 

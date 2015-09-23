@@ -21,7 +21,9 @@
 ;					parallel structure
 ;  (note-to-number note) - translate absolute note name to number
 ;  (notes-to-numbers lst) - translate list of absolute notes name to numbers
-;  (transpose phrase offset)
+;  (transpose-natural note offset) - symbolic transpose
+;  (transpose-naturals lst offset) - symbolic transpose
+;  (transpose-phrase phrase offset) - numeric transpose
 ;  (scale-length lst factor)
 ;  (merge-phrases phrase1 phrase2 ....)
 ;  (merge-phraselist (phrase1 phrase2 ....))
@@ -60,7 +62,9 @@
 (provide make-parallel)
 (provide note-to-number)
 (provide notes-to-numbers)
-(provide transpose)
+(provide transpose-natural)
+(provide transpose-naturals)
+(provide transpose-phrase)
 (provide scale-length)
 (provide merge-phrases)
 (provide merge-phraselist)
@@ -147,6 +151,24 @@
 ; pitch manipulation
 ;
 
+;
+; symbolic transpose of natural note
+;
+(define (transpose-natural note offset)
+  (if (eq? note 'nap) 'nap ; leave nap unchanged
+    (let* ((naturals (vector 'c 'd 'e 'f 'g 'a 'b))
+           (ref (vector-member note naturals)))
+         (if (not ref) #f ; not found
+          (vector-ref naturals (modulo (+ ref offset) (vector-length naturals)))))))
+
+; symbolic transpose of a list of natural notes
+(define (transpose-naturals lst offset)
+  (if (empty? lst) '()
+      (cons (transpose-natural (car lst) offset) (transpose-naturals (cdr lst) offset))))
+
+;
+; numeric transpose of natural note
+;
 ;; transpose a note
 ;; first find out if note is a symbol like 'serial or 'parallel, in that case return unchanged
 ;;  else find out if note is a note or a nap or something else
@@ -159,7 +181,7 @@
         note))))
 
 ; Transpose a phrase using apply-transform at note level
-(define (transpose phrase offset)
+(define (transpose-phrase phrase offset)
   (apply-transform phrase '() '() (lambda (note) (transpose-note note offset))))
 
 ; transpose-tuplet: add offset to tuplet notes
