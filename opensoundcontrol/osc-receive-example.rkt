@@ -1,6 +1,6 @@
 #lang racket
 
-(require inf/racket_osc/osc-receive)
+(require csd)
          
 (define receive-port 12345) ; port number we will listen to
 (start-receiving-osc receive-port)
