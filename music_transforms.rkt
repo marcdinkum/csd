@@ -91,6 +91,7 @@
 ; Combine melody and rhythm into a serial phrase according to our own format.
 ;
 ; A pitch identifier that is not a number is regarded as a nap.
+; A numeric rhythm identifier is expanded to the length of the melody
 ;
 ; We don't want to support other notation like c, dis, bes here because
 ;  that would be interpreted as an absolute notation, which e.g. leads to
@@ -98,7 +99,9 @@
 ; Well... maybe later if we fully understand the consequences :-)
 
 (define (make-phrase melody rhythm)
-  (cons 'serial (make-tuplet melody rhythm)))
+  (if (number? rhythm)
+    (cons 'serial (make-tuplet melody (for/list ((i (length melody))) rhythm)))
+    (cons 'serial (make-tuplet melody rhythm))))
 
 (define (make-tuplet lst1 lst2)
   (if (or (empty? lst1) (empty? lst2)) '()
@@ -357,6 +360,8 @@
 ;(define melodie '(9 7 5 7  nap 9 5))
 ;(define ritme '(16 16 16 16  (tuplet 2 16 16 16)))
 ;(define phrase (make-phrase melodie ritme))
+;  OR
+;(define phrase (make-phrase melodie 8)) ; all 8-th notes
 ;(define compositie (merge-phrases phrase (transpose notes 3) (scale-length notes 2)))
 
 ;(define trpnotes (transpose notes 60))
