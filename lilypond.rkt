@@ -44,7 +44,7 @@
  (class object%
 
   ; define some default values
-  (define lilyversion "2.18.2")
+  (define lilyversion "2.24.3")
   (define fileport 0)
   (define filetype 'part)
   (define parts '())
@@ -332,11 +332,7 @@
     (when (eq? filetype 'score) ; close StaffGroup
       (fprintf fileport "\n    >>\n  } % StaffGroup\n\n"))
     ; write layout, midi and close score
-    (fprintf fileport "\n  \\layout {
-    \\context { \\RemoveEmptyStaffContext }
-  }
-  \\midi { }
-} % score" )
+    (fprintf fileport "\n \\layout {} \n\n \\midi { } \n} % score" )
     (close-output-port fileport))
 
 )) ; class LilyGenerator%
